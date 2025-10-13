@@ -39,3 +39,13 @@ def add_sigma_monotonicity(w: WCNF, thresholds: Dict[int,List[float]], yvars: Di
         for i in range(len(ts)-1):
             t_low, t_high = ts[i], ts[i+1]
             w.append([-yvars[(j, t_high)], yvars[(j, t_low)]])
+            
+def add_soft_tx(w: WCNF, x: np.ndarray, thresholds: Dict[int,List[float]], yvars: Dict[Tuple[int,float], int]):
+    # y_{j,t} := (x_j > t)  -> soft units
+    for j, ts in thresholds.items():
+        for t in ts:
+            y = yvars[(j, t)]
+            if x[j] > t:
+                w.append([y], weight=1)
+            else:
+                w.append([-y], weight=1)
