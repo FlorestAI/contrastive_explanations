@@ -21,3 +21,8 @@ def collect_thresholds(models: List[Any]) -> Dict[int, List[float]]:
                 if f != _tree.TREE_UNDEFINED: 
                     per_feat.setdefault(int(f), set()).add(float(t)) 
     return {j: sorted(list(vals)) for j, vals in per_feat.items()} 
+
+def add_atleast_k(w: WCNF, lits: List[int], k: int, pool: IDPool): 
+    if k <= 0: return # 
+    enc = CardEnc.atleast(lits=lits, bound=k, vpool=pool, encoding=1)
+    for cls in enc.clauses: w.append(cls)
