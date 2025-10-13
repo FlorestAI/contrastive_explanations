@@ -49,3 +49,16 @@ def add_soft_tx(w: WCNF, x: np.ndarray, thresholds: Dict[int,List[float]], yvars
                 w.append([y], weight=1)
             else:
                 w.append([-y], weight=1)
+                
+def diff_cost_from_model(model, yvars: Dict[Tuple[int,float], int], thresholds: Dict[int,List[float]], x: np.ndarray):
+    if model is None: return None, []
+    pos = set(l for l in model if l > 0)
+    changes = []
+    for j, ts in thresholds.items():
+        for t in ts:
+            v = yvars[(j, t)]
+            want = 1 if x[j] > t else 0
+            got  = 1 if (v in pos) else 0
+            if got != want:
+                changes.append((j, t, got))  # got=1 -> ">" ; got=0 -> "<="
+    return len(changes), changes
