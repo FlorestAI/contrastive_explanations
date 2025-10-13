@@ -26,3 +26,9 @@ def add_atleast_k(w: WCNF, lits: List[int], k: int, pool: IDPool):
     if k <= 0: return # 
     enc = CardEnc.atleast(lits=lits, bound=k, vpool=pool, encoding=1)
     for cls in enc.clauses: w.append(cls)
+    
+def add_atmost_one(w: WCNF, lits: List[int]):
+    # pairwise
+    for i in range(len(lits)):
+        for j in range(i+1, len(lits)):
+            w.append([-lits[i], -lits[j]])
