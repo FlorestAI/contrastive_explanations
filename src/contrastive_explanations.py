@@ -32,3 +32,10 @@ def add_atmost_one(w: WCNF, lits: List[int]):
     for i in range(len(lits)):
         for j in range(i+1, len(lits)):
             w.append([-lits[i], -lits[j]])
+            
+def add_sigma_monotonicity(w: WCNF, thresholds: Dict[int,List[float]], yvars: Dict[Tuple[int,float], int]):
+    # y(j, t_high) -> y(j, t_low)  quando t_high > t_low
+    for j, ts in thresholds.items():
+        for i in range(len(ts)-1):
+            t_low, t_high = ts[i], ts[i+1]
+            w.append([-yvars[(j, t_high)], yvars[(j, t_low)]])
