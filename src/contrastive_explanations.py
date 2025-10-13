@@ -62,3 +62,10 @@ def diff_cost_from_model(model, yvars: Dict[Tuple[int,float], int], thresholds: 
             if got != want:
                 changes.append((j, t, got))  # got=1 -> ">" ; got=0 -> "<="
     return len(changes), changes
+
+def fmt_changes(changes, feature_names):
+    out = []
+    for j,t,got in sorted(changes, key=lambda z:(z[0], z[1])):
+        sign = ">" if got==1 else "<="
+        out.append(f"{feature_names[j]} {sign} {t:.3f}")
+    return out
