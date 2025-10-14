@@ -208,3 +208,60 @@ def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_c
             chosen_paths.setdefault(t_idx, []).append(per_tree_paths[t_idx][p_idx])
 
     return cost, changes_fmt, chosen_paths
+
+# ----------------------------- Demo no Iris -----------------------------
+
+iris = load_iris()
+X, y = iris.data, iris.target
+fnames, cnames = np.array(iris.feature_names), np.array(iris.target_names)
+Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.25, random_state=1, stratify=y)
+
+dt = DecisionTreeClassifier(random_state=0)
+rf = RandomForestClassifier(n_estimators=100, random_state=0)
+dt.fit(Xtr, ytr); rf.fit(Xtr, ytr)
+
+# escolha da instância
+idx = 10  # mude se quiser
+x = Xte[idx]
+
+cur_dt = int(dt.predict([x])[0])
+cur_rf = int(rf.predict([x])[0])
+print("=== Instance ===")
+print(x)
+print("Predições atuais: DT =", cnames[cur_dt], "| RF =", cnames[cur_rf])
+
+target_name = None  # "setosa" | "versicolor" | "virginica" | None (testar todas)
+
+def run_for_target(tgt_idx: int):
+    print("\n============================")
+    print("TARGET:", cnames[tgt_idx])
+    print("============================")
+
+    cost_dt, chg_dt, path_dt = solve_tree_min_changes(dt, x, tgt_idx, fnames)
+    if cost_dt is None:
+        print("[ÁRVORE] Sem folha-alvo ou UNSAT (caminho inválido).")
+    else:
+        print(f"[ÁRVORE] #mín. mudanças: {cost_dt}")
+        for s in chg_dt: print(" -", s)
+        if path_dt:
+            print("Caminho usado (feat, thr, dir):")
+            for (f,t,d) in path_dt:
+                print(f"  ({fnames[f]}, {t:.3f}, {'right' if d=='R' else 'left'})")
+
+    cost_rf, chg_rf, chosen = solve_forest_min_changes(rf, x, tgt_idx, fnames)
+    if cost_rf is None:
+        print("[FLORESTA] UNSAT (maioria impossível sob Σ).")
+    else:
+        print(f"[FLORESTA] #mín. mudanças: {cost_rf}")
+        for s in chg_rf: print(" -", s)
+        # opcional: quantas árvores votaram alvo
+        print("Árvores que votaram alvo:", len(chosen))
+
+if target_name is None:
+    for k in range(len(cnames)):
+        run_for_target(k)
+else:
+    tgt_idx = int(np.where(cnames == target_name)[0][0])
+    run_for_target(tgt_idx)
+
+
