@@ -219,7 +219,7 @@ rf = RandomForestClassifier(n_estimators=100, random_state=0)
 dt.fit(Xtr, ytr); rf.fit(Xtr, ytr)
 
 # escolha da instância
-idx = 10  # mude se quiser
+idx = 3  # mude se quiser
 x = Xte[idx]
 
 cur_dt = int(dt.predict([x])[0])
