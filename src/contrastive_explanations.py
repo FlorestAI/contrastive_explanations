@@ -90,3 +90,7 @@ def enumerate_paths_to_leaves(dt: DecisionTreeClassifier):
             stack.append((right, path + [(int(f), thr, 'R')]))  # x>thr
             stack.append((left,  path + [(int(f), thr, 'L')]))  # x<=thr
     return paths  # list of (path, class)
+
+def enumerate_target_paths_tree(dt: DecisionTreeClassifier, target_class: int):
+    paths = enumerate_paths_to_leaves(dt)
+    return [p for p,c in paths if c == target_class]
