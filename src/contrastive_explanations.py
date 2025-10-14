@@ -107,7 +107,7 @@ def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_cla
     if not target_paths:
         return None, [], []  # sem folha alvo
 
-    for path in target_paths:
+      for path in target_paths:
         pool = IDPool()
         w = WCNF()
 
