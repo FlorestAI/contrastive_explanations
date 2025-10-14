@@ -132,3 +132,15 @@ def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_cla
             best = (cost, fmt_changes(changes, feature_names), path)
 
     return best if best is not None else (None, [], [])
+
+
+# ----------------------------- FLORESTA: maioria via disjunção de caminhos -----------------------------
+
+def enumerate_target_paths_forest(rf: RandomForestClassifier, target_class: int):
+    """Retorna lista por árvore: paths_t = [ [(feat,thr,dir), ...], ... ] apenas para folhas da classe alvo"""
+    per_tree = []
+    for est in rf.estimators_:
+        per_tree.append(enumerate_target_paths_tree(est, target_class))
+    return per_tree  # list of list-of-paths
+
+
