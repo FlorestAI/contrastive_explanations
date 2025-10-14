@@ -69,3 +69,66 @@ def fmt_changes(changes, feature_names):
         sign = ">" if got==1 else "<="
         out.append(f"{feature_names[j]} {sign} {t:.3f}")
     return out
+
+# ----------------------------- caminhos de árvore -----------------------------
+
+def enumerate_paths_to_leaves(dt: DecisionTreeClassifier):
+    """Retorna lista de caminhos. Cada caminho: [(feat, thr, dir)], dir in {'L','R'}, e a classe da folha."""
+    tr = dt.tree_
+    paths = []
+    stack = [(0, [])]  # (node_id, path_so_far)
+
+    while stack:
+        nid, path = stack.pop()
+        f = tr.feature[nid]
+        if f == _tree.TREE_UNDEFINED:
+            leaf_cls = int(np.argmax(tr.value[nid][0]))
+            paths.append((path, leaf_cls))
+        else:
+            thr = float(tr.threshold[nid])
+            left, right = tr.children_left[nid], tr.children_right[nid]
+            stack.append((right, path + [(int(f), thr, 'R')]))  # x>thr
+            stack.append((left,  path + [(int(f), thr, 'L')]))  # x<=thr
+    return paths  # list of (path, class)
+
+def enumerate_target_paths_tree(dt: DecisionTreeClassifier, target_class: int):
+    paths = enumerate_paths_to_leaves(dt)
+    return [p for p,c in paths if c == target_class]
+
+# ----------------------------- ÁRVORE: resolver por caminho -----------------------------
+
+def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_class: int,
+                           feature_names: List[str]) -> Tuple[int, List[str], List[Tuple[int,float,str]]]:
+    """Retorna (custo, lista strings mudanças, caminho escolhido)"""
+    all_thresholds = collect_thresholds([dt])
+    best = None  # (cost, changes, path)
+
+    target_paths = enumerate_target_paths_tree(dt, target_class)
+    if not target_paths:
+        return None, [], []  # sem folha alvo
+
+      for path in target_paths:
+        pool = IDPool()
+        w = WCNF()
+
+        # vars y(j,t)
+        y = {(j,t): pool.id(('y', j, t)) for j, ts in all_thresholds.items() for t in ts}
+        # Σ e Csoft
+        add_sigma_monotonicity(w, all_thresholds, y)
+        add_soft_tx(w, x, all_thresholds, y)
+
+        # f = conjunção dos testes do caminho
+        for (feat, thr, d) in path:
+            lit = y[(feat, thr)]
+            w.append([ lit] if d=='R' else [-lit])  # R: x>thr ; L: x<=thr
+
+        # solve
+        with RC2(w) as rc2:
+            m = rc2.compute()
+        cost, changes = diff_cost_from_model(m, y, all_thresholds, x)
+        if cost is None:  # deveria não acontecer para caminho válido
+            continue
+        if (best is None) or (cost < best[0]):
+            best = (cost, fmt_changes(changes, feature_names), path)
+
+    return best if best is not None else (None, [], [])
