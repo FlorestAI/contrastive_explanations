@@ -69,3 +69,24 @@ def fmt_changes(changes, feature_names):
         sign = ">" if got==1 else "<="
         out.append(f"{feature_names[j]} {sign} {t:.3f}")
     return out
+
+# ----------------------------- caminhos de árvore -----------------------------
+
+def enumerate_paths_to_leaves(dt: DecisionTreeClassifier):
+    """Retorna lista de caminhos. Cada caminho: [(feat, thr, dir)], dir in {'L','R'}, e a classe da folha."""
+    tr = dt.tree_
+    paths = []
+    stack = [(0, [])]  # (node_id, path_so_far)
+
+    while stack:
+        nid, path = stack.pop()
+        f = tr.feature[nid]
+        if f == _tree.TREE_UNDEFINED:
+            leaf_cls = int(np.argmax(tr.value[nid][0]))
+            paths.append((path, leaf_cls))
+        else:
+            thr = float(tr.threshold[nid])
+            left, right = tr.children_left[nid], tr.children_right[nid]
+            stack.append((right, path + [(int(f), thr, 'R')]))  # x>thr
+            stack.append((left,  path + [(int(f), thr, 'L')]))  # x<=thr
+    return paths  # list of (path, class)
