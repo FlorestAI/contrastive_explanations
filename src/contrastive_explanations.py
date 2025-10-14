@@ -208,3 +208,4 @@ def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_c
             chosen_paths.setdefault(t_idx, []).append(per_tree_paths[t_idx][p_idx])
 
     return cost, changes_fmt, chosen_paths
+
