@@ -144,3 +144,67 @@ def enumerate_target_paths_forest(rf: RandomForestClassifier, target_class: int)
     return per_tree  # list of list-of-paths
 
 
+def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_class: int,
+                             feature_names: List[str]) -> Tuple[int, List[str], Dict[int, List[Tuple[int,float,str]]]]:
+    """
+    Retorna (custo, mudanças_fmt, caminhos_escolhidos_por_árvore)
+    f: para cada árvore t, escolhe no máximo 1 caminho alvo (variáveis k_{t,p}),
+       z_t é verdadeiro sse algum k_{t,p} é verdadeiro; maioria em z_t.
+    """
+    per_tree_paths = enumerate_target_paths_forest(rf, target_class)
+    # se poucas árvores têm caminho-alvo, maioria pode ser impossível; deixamos o solver decidir (UNSAT)
+    pool = IDPool()
+    w = WCNF()
+
+    thresholds = collect_thresholds([rf])
+    y = {(j,t): pool.id(('y', j, t)) for j, ts in thresholds.items() for t in ts}
+    add_sigma_monotonicity(w, thresholds, y)
+    add_soft_tx(w, x, thresholds, y)
+
+    z_vars = []
+    k_vars = {}  # (t, p_idx) -> var
+    for t_idx, paths in enumerate(per_tree_paths):
+        z_t = pool.id(('z', t_idx))
+        z_vars.append(z_t)
+        if not paths:
+            # nenhuma folha-alvo nesta árvore: força ¬z_t
+            w.append([-z_t])
+            continue
+
+        k_list = []
+        for p_idx, path in enumerate(paths):
+            k = pool.id(('k', t_idx, p_idx))
+            k_vars[(t_idx, p_idx)] = k
+            k_list.append(k)
+            # k -> (conjunção dos testes do caminho)
+            for (feat, thr, d) in path:
+                lit = y[(feat, thr)]
+                w.append([-k,  lit] if d=='R' else [-k, -lit])
+            # k -> z_t
+            w.append([-k, z_t])
+
+        # z_t -> (∨ k)
+        w.append([-z_t] + k_list)
+        # (opcional, mas ajuda) no máximo um caminho escolhido por árvore
+        add_atmost_one(w, k_list)
+
+    need = (len(rf.estimators_) // 2) + 1
+    add_atleast_k(w, z_vars, need, pool)
+
+    with RC2(w) as rc2:
+        m = rc2.compute()
+    if m is None:
+        return None, [], {}
+
+    # custo e mudanças
+    cost, changes = diff_cost_from_model(m, y, thresholds, x)
+    changes_fmt = fmt_changes(changes, feature_names)
+
+    # decodificar caminhos escolhidos
+    pos = set(l for l in m if l > 0)
+    chosen_paths = {}
+    for (t_idx, p_idx), kv in k_vars.items():
+        if kv in pos:
+            chosen_paths.setdefault(t_idx, []).append(per_tree_paths[t_idx][p_idx])
+
+    return cost, changes_fmt, chosen_paths
