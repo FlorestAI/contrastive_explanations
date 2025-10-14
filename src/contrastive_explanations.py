@@ -9,7 +9,7 @@ from pysat.formula import IDPool, WCNF
 from pysat.examples.rc2 import RC2
 from pysat.card import CardEnc
 
-# ----------------------------- utilitários comuns ----------------------------- #
+# ----------------------------- utilitários comuns -----------------------------
 
 def collect_thresholds(models: List[Any]) -> Dict[int, List[float]]:
     per_feat: Dict[int, Set[float]] = {} 
@@ -25,21 +25,21 @@ def collect_thresholds(models: List[Any]) -> Dict[int, List[float]]:
 def add_atleast_k(w: WCNF, lits: List[int], k: int, pool: IDPool): 
     if k <= 0: return # 
     enc = CardEnc.atleast(lits=lits, bound=k, vpool=pool, encoding=1)
-    for cls in enc.clauses: w.append(cls)
-    
+    for cls in enc.clauses: w.append(cls)  
+
 def add_atmost_one(w: WCNF, lits: List[int]):
     # pairwise
     for i in range(len(lits)):
         for j in range(i+1, len(lits)):
-            w.append([-lits[i], -lits[j]])
-            
+            w.append([-lits[i], -lits[j]])           
+
 def add_sigma_monotonicity(w: WCNF, thresholds: Dict[int,List[float]], yvars: Dict[Tuple[int,float], int]):
     # y(j, t_high) -> y(j, t_low)  quando t_high > t_low
     for j, ts in thresholds.items():
         for i in range(len(ts)-1):
             t_low, t_high = ts[i], ts[i+1]
-            w.append([-yvars[(j, t_high)], yvars[(j, t_low)]])
-            
+            w.append([-yvars[(j, t_high)], yvars[(j, t_low)]])           
+
 def add_soft_tx(w: WCNF, x: np.ndarray, thresholds: Dict[int,List[float]], yvars: Dict[Tuple[int,float], int]):
     # y_{j,t} := (x_j > t)  -> soft units
     for j, ts in thresholds.items():
@@ -48,8 +48,8 @@ def add_soft_tx(w: WCNF, x: np.ndarray, thresholds: Dict[int,List[float]], yvars
             if x[j] > t:
                 w.append([y], weight=1)
             else:
-                w.append([-y], weight=1)
-                
+                w.append([-y], weight=1)              
+
 def diff_cost_from_model(model, yvars: Dict[Tuple[int,float], int], thresholds: Dict[int,List[float]], x: np.ndarray):
     if model is None: return None, []
     pos = set(l for l in model if l > 0)
@@ -107,7 +107,7 @@ def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_cla
     if not target_paths:
         return None, [], []  # sem folha alvo
 
-      for path in target_paths:
+    for path in target_paths:
         pool = IDPool()
         w = WCNF()
 
@@ -133,7 +133,6 @@ def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_cla
 
     return best if best is not None else (None, [], [])
 
-
 # ----------------------------- FLORESTA: maioria via disjunção de caminhos -----------------------------
 
 def enumerate_target_paths_forest(rf: RandomForestClassifier, target_class: int):
@@ -142,7 +141,6 @@ def enumerate_target_paths_forest(rf: RandomForestClassifier, target_class: int)
     for est in rf.estimators_:
         per_tree.append(enumerate_target_paths_tree(est, target_class))
     return per_tree  # list of list-of-paths
-
 
 def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_class: int,
                              feature_names: List[str]) -> Tuple[int, List[str], Dict[int, List[Tuple[int,float,str]]]]:
@@ -207,7 +205,7 @@ def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_c
         if kv in pos:
             chosen_paths.setdefault(t_idx, []).append(per_tree_paths[t_idx][p_idx])
 
-    return cost, changes_fmt, chosen_paths
+    return cost, changes_fmt, chosen_paths
 
 # ----------------------------- Demo no Iris -----------------------------
 
@@ -221,7 +219,7 @@ rf = RandomForestClassifier(n_estimators=100, random_state=0)
 dt.fit(Xtr, ytr); rf.fit(Xtr, ytr)
 
 # escolha da instância
-idx = 10  # mude se quiser
+idx = 3  # mude se quiser
 x = Xte[idx]
 
 cur_dt = int(dt.predict([x])[0])
@@ -263,14 +261,3 @@ if target_name is None:
 else:
     tgt_idx = int(np.where(cnames == target_name)[0][0])
     run_for_target(tgt_idx)
-
-
-
-
-
-
-
-
-
-
-
