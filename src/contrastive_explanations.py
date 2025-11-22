@@ -1,4 +1,4 @@
-from typing import Dict, Tuple, List, Set, Any
+from typing import Dict, Tuple, List, Set, Any, Dict as TDict
 import numpy as np
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -8,6 +8,10 @@ from sklearn.ensemble import RandomForestClassifier
 from pysat.formula import IDPool, WCNF
 from pysat.examples.rc2 import RC2
 from pysat.card import CardEnc
+
+import time
+import random
+from statistics import mean
 
 # ----------------------------- utilitários comuns -----------------------------
 
@@ -207,6 +211,90 @@ def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_c
 
     return cost, changes_fmt, chosen_paths
 
+# ----------------------------- Avaliação / métricas -----------------------------
+
+def evaluate_explanations(
+    dt: DecisionTreeClassifier,
+    rf: RandomForestClassifier,
+    Xtest: np.ndarray,
+    n_classes: int,
+    feature_names: List[str],
+    n_samples: int = 30,
+    random_seed: int = 0,
+):
+    """
+    Roda explicações contrastivas em n_samples instâncias aleatórias do conjunto de teste
+    e retorna estatísticas agregadas:
+      - tempo médio (árvore, floresta)
+      - custo médio (# mudanças) (árvore, floresta)
+      - tamanho médio da explicação (árvore: len(path); floresta: soma len(paths))
+      - contagens de exemplos válidos usados (cada método pode não achar solução para alguns alvos)
+    """
+    if n_samples <= 0:
+        raise ValueError("n_samples deve ser > 0")
+
+    rng = random.Random(random_seed)
+    indices = rng.sample(range(len(Xtest)), min(n_samples, len(Xtest)))
+
+    # métricas coletadas
+    tree_times = []
+    forest_times = []
+
+    tree_costs = []
+    forest_costs = []
+
+    tree_sizes = []    # tamanho dos caminhos da árvore
+    forest_sizes = []  # tamanho total dos caminhos usados na floresta
+
+    tree_valid = 0
+    forest_valid = 0
+
+    for idx in indices:
+        x = Xtest[idx]
+
+        # para cada classe-alvo
+        for target_class in range(n_classes):
+
+            # === árvore ===
+            t0 = time.time()
+            cost_dt, chg_dt, path_dt = solve_tree_min_changes(dt, x, target_class, feature_names)
+            t1 = time.time()
+
+            if cost_dt is not None:
+                tree_times.append(t1 - t0)
+                tree_costs.append(cost_dt)
+                tree_sizes.append(len(path_dt))
+                tree_valid += 1
+
+            # === floresta ===
+            t0 = time.time()
+            cost_rf, chg_rf, chosen_paths = solve_forest_min_changes(rf, x, target_class, feature_names)
+            t1 = time.time()
+
+            if cost_rf is not None:
+                forest_times.append(t1 - t0)
+                forest_costs.append(cost_rf)
+                # tamanho da explicação = soma dos tamanhos dos caminhos das árvores escolhidas
+                total_path_size = sum(len(path) for plist in chosen_paths.values() for path in plist)
+                forest_sizes.append(total_path_size)
+                forest_valid += 1
+
+    def safe_mean(lst):
+        return mean(lst) if lst else None
+
+    stats = {
+        "tree_avg_time": safe_mean(tree_times),
+        "forest_avg_time": safe_mean(forest_times),
+        "tree_avg_cost": safe_mean(tree_costs),
+        "forest_avg_cost": safe_mean(forest_costs),
+        "tree_avg_size": safe_mean(tree_sizes),
+        "forest_avg_size": safe_mean(forest_sizes),
+        "tree_valid_count": tree_valid,
+        "forest_valid_count": forest_valid,
+        "n_samples_used": len(indices),
+    }
+    return stats
+
 # ----------------------------- Demo no Iris -----------------------------
 
 iris = load_iris()
@@ -261,3 +349,104 @@ if target_name is None:
 else:
     tgt_idx = int(np.where(cnames == target_name)[0][0])
     run_for_target(tgt_idx)
+
+    # ----------------------------- Gráfico Comparativo (Árvore vs Floresta) -----------------------------
+def plot_comparison_bar(stats):
+    """
+    Gera um gráfico comparando:
+      - tempo médio
+      - custo médio
+      - tamanho médio do caminho
+    entre árvore de decisão e floresta.
+    """
+    import matplotlib.pyplot as plt
+    import numpy as np
+
+    metrics = ["avg_time", "avg_cost", "avg_size"]
+    tree_values = [
+        stats["tree_avg_time"],
+        stats["tree_avg_cost"],
+        stats["tree_avg_size"],
+    ]
+    forest_values = [
+        stats["forest_avg_time"],
+        stats["forest_avg_cost"],
+        stats["forest_avg_size"],
+    ]
+
+    x = np.arange(len(metrics))
+    width = 0.35
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+
+    ax.bar(x - width/2, tree_values, width, label='Árvore', edgecolor='black')
+    ax.bar(x + width/2, forest_values, width, label='Floresta', edgecolor='black')
+
+    ax.set_xticks(x)
+    ax.set_xticklabels(["Tempo Médio", "Custo Médio", "Tamanho Médio"])
+    ax.set_ylabel("Média")
+    ax.set_title("Comparação: Árvore vs Floresta")
+    ax.legend()
+
+    plt.tight_layout()
+    plt.savefig("comparacao_tree_forest.png", dpi=200, bbox_inches="tight")
+    plt.show()
+    print("Gráfico comparativo salvo como: comparacao_tree_forest.png")
+# ----------------------------- Avaliação agregada (métricas) -----------------------------
+
+# Ajuste n_samples para o número de instâncias que quer testar (max: len(Xte))
+n_samples = 30
+print("\n==== AVALIAÇÃO AGREGADA ====")
+stats = evaluate_explanations(
+    dt=dt,
+    rf=rf,
+    Xtest=Xte,
+    n_classes=len(np.unique(y)),
+    feature_names=fnames,
+    n_samples=n_samples,
+    random_seed=1,
+)
+
+for k, v in stats.items():
+    print(f"{k}: {v}")
+    # --- gerar gráfico comparativo ---
+plot_comparison_bar(stats)
+
+# ----------------------------- Gráficos das Árvores -----------------------------
+import matplotlib.pyplot as plt
+from sklearn import tree
+
+print("\n==== GERANDO GRÁFICOS DAS ÁRVORES ====")
+
+# --- 1) Árvore única (dt) ---
+plt.figure(figsize=(14, 10))
+tree.plot_tree(
+    dt,
+    feature_names=fnames,
+    class_names=cnames,
+    filled=True,
+    rounded=True,
+    fontsize=9
+)
+plt.title("Decision Tree (dt)")
+plt.tight_layout()
+plt.savefig("tree_dt.png", dpi=200, bbox_inches="tight")
+plt.show()
+print("Árvore dt salva em: tree_dt.png")
+
+# --- 2) Primeira árvore da floresta (rf.estimators_[0]) ---
+est0 = rf.estimators_[0]
+plt.figure(figsize=(14, 10))
+tree.plot_tree(
+    est0,
+    feature_names=fnames,
+    class_names=cnames,
+    filled=True,
+    rounded=True,
+    fontsize=7
+)
+plt.title("Random Forest - Estimator 0")
+plt.tight_layout()
+plt.savefig("tree_rf_0.png", dpi=200, bbox_inches="tight")
+plt.show()
+print("Árvore rf[0] salva em: tree_rf_0.png")
