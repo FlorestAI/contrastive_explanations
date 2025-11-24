@@ -13,6 +13,9 @@ import time
 import random
 from statistics import mean
 
+import pandas as pd
+from ucimlrepo import fetch_ucirepo
+
 # ----------------------------- utilitários comuns -----------------------------
 
 def collect_thresholds(models: List[Any]) -> Dict[int, List[float]]:
@@ -139,77 +142,89 @@ def solve_tree_min_changes(dt: DecisionTreeClassifier, x: np.ndarray, target_cla
 
 # ----------------------------- FLORESTA: maioria via disjunção de caminhos -----------------------------
 
-def enumerate_target_paths_forest(rf: RandomForestClassifier, target_class: int):
-    """Retorna lista por árvore: paths_t = [ [(feat,thr,dir), ...], ... ] apenas para folhas da classe alvo"""
+# Percorre cada arvore do modelo de decisao randonforest treinado, e retorna 
+# os caminhos que levam a classe alvo 
+def get_target_paths_per_tree(rf: RandomForestClassifier, target_class: int):
+    """Retorna lista de caminhos alvo por árvore."""
     per_tree = []
     for est in rf.estimators_:
         per_tree.append(enumerate_target_paths_tree(est, target_class))
     return per_tree  # list of list-of-paths
 
-def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_class: int,
-                             feature_names: List[str]) -> Tuple[int, List[str], Dict[int, List[Tuple[int,float,str]]]]:
-    """
-    Retorna (custo, mudanças_fmt, caminhos_escolhidos_por_árvore)
-    f: para cada árvore t, escolhe no máximo 1 caminho alvo (variáveis k_{t,p}),
-       z_t é verdadeiro sse algum k_{t,p} é verdadeiro; maioria em z_t.
-    """
-    per_tree_paths = enumerate_target_paths_forest(rf, target_class)
-    # se poucas árvores têm caminho-alvo, maioria pode ser impossível; deixamos o solver decidir (UNSAT)
+# prepara o ambiente pra resolver o problema lógico com base nas regras aprendidas pelo modelo 
+def setup_solver(rf: RandomForestClassifier, x: np.ndarray): # debug: x = array([4.8, 3.4, 1.6, 0.2])
+    """Cria pool, WCNF, thresholds e variáveis y(j,t)."""
     pool = IDPool()
     w = WCNF()
+    thresholds = collect_thresholds([rf]) # debug: {3: [0.6000000014901161, 0.6500000059604645,...]}
+    y_vars = {(j, t): pool.id(('y', j, t)) for j, ts in thresholds.items() for t in ts} # debug: {(3, 0.6000000014901161): 1, (3, 0.6500000059604645): 2...}
+    return pool, w, thresholds, y_vars
 
-    thresholds = collect_thresholds([rf])
-    y = {(j,t): pool.id(('y', j, t)) for j, ts in thresholds.items() for t in ts}
-    add_sigma_monotonicity(w, thresholds, y)
-    add_soft_tx(w, x, thresholds, y)
-
+def add_tree_constraints(w: WCNF, pool: IDPool, y_vars: Dict[Tuple[int,float], int],
+                         per_tree_paths: List[List[List[Tuple[int,float,str]]]]):
+    """Adiciona variáveis z_t, k_{t,p} e todas as constraints de árvores."""
     z_vars = []
-    k_vars = {}  # (t, p_idx) -> var
+    k_vars = {}
     for t_idx, paths in enumerate(per_tree_paths):
         z_t = pool.id(('z', t_idx))
         z_vars.append(z_t)
+
         if not paths:
-            # nenhuma folha-alvo nesta árvore: força ¬z_t
             w.append([-z_t])
             continue
 
         k_list = []
-        for p_idx, path in enumerate(paths):
+        for p_idx, path in enumerate(paths): 
             k = pool.id(('k', t_idx, p_idx))
             k_vars[(t_idx, p_idx)] = k
             k_list.append(k)
-            # k -> (conjunção dos testes do caminho)
-            for (feat, thr, d) in path:
-                lit = y[(feat, thr)]
-                w.append([-k,  lit] if d=='R' else [-k, -lit])
+            
+            # se um caminho é escolhido, todos os testes desse caminho devem ser satisfeitos pelos atributos da instância
+            for feat, thr, d in path: # debug: path = [(3, 0.800000011920929, 'L')] == (x(3) <= 0.8?) 
+                lit = y_vars[(feat, thr)]
+                w.append([-k, lit] if d == 'R' else [-k, -lit])
             # k -> z_t
             w.append([-k, z_t])
-
         # z_t -> (∨ k)
         w.append([-z_t] + k_list)
-        # (opcional, mas ajuda) no máximo um caminho escolhido por árvore
         add_atmost_one(w, k_list)
 
+    return z_vars, k_vars
+
+# adiciona restrições de variáveis need serem verdadeiras
+def add_majority_constraint(w: WCNF, z_vars: List[int], rf: RandomForestClassifier):
     need = (len(rf.estimators_) // 2) + 1
+    pool = IDPool()  # necessário para add_atleast_k
     add_atleast_k(w, z_vars, need, pool)
 
-    with RC2(w) as rc2:
-        m = rc2.compute()
+def extract_solver_result(m, y_vars, thresholds, x, feature_names, k_vars, per_tree_paths):
+    """Decodifica resultado do solver: custo, mudanças legíveis e caminhos escolhidos."""
     if m is None:
         return None, [], {}
-
-    # custo e mudanças
-    cost, changes = diff_cost_from_model(m, y, thresholds, x)
+    cost, changes = diff_cost_from_model(m, y_vars, thresholds, x)
     changes_fmt = fmt_changes(changes, feature_names)
-
-    # decodificar caminhos escolhidos
     pos = set(l for l in m if l > 0)
     chosen_paths = {}
     for (t_idx, p_idx), kv in k_vars.items():
         if kv in pos:
             chosen_paths.setdefault(t_idx, []).append(per_tree_paths[t_idx][p_idx])
-
     return cost, changes_fmt, chosen_paths
+
+# Encontrar o menor número de mudanças necessárias na instância x para que a floresta rf vote na classe target_class.
+def solve_forest_min_changes(rf: RandomForestClassifier, x: np.ndarray, target_class: int,
+                                     feature_names: List[str]) -> Tuple[int, List[str], Dict[int, List[Tuple[int,float,str]]]]:
+
+    per_tree_paths = get_target_paths_per_tree(rf, target_class)
+    pool, w, thresholds, y_vars = setup_solver(rf, x)
+    add_sigma_monotonicity(w, thresholds, y_vars)
+    add_soft_tx(w, x, thresholds, y_vars)
+    z_vars, k_vars = add_tree_constraints(w, pool, y_vars, per_tree_paths)
+    add_majority_constraint(w, z_vars, rf)
+
+    with RC2(w) as rc2:
+        m = rc2.compute()
+
+    return extract_solver_result(m, y_vars, thresholds, x, feature_names, k_vars, per_tree_paths)
 
 # ----------------------------- Avaliação / métricas -----------------------------
 
@@ -295,13 +310,50 @@ def evaluate_explanations(
     }
     return stats
 
-# ----------------------------- Demo no Iris -----------------------------
+# ----------------------------- LOAD DATASETS REAIS -----------------------------
 
-iris = load_iris()
-X, y = iris.data, iris.target
-fnames, cnames = np.array(iris.feature_names), np.array(iris.target_names)
+def load_bupa() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Dataset BUPA (Liver Disorders)"""
+    data = fetch_ucirepo(id=8)
+    X = data.data.features.apply(pd.to_numeric, errors='coerce').to_numpy()
+    X = np.nan_to_num(X, nan=0.0)
+    y = data.data.targets.to_numpy().reshape(-1)
+    y = (y == y.max()).astype(int)
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["no-disorder", "disorder"])
+    return X, y, fnames, cnames
+
+def load_breast_tumor() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Breast Cancer Coimbra"""
+    data = fetch_ucirepo(id=451)
+    X = data.data.features.to_numpy()
+    y = data.data.targets.to_numpy().reshape(-1)
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["benign", "malignant"])
+    return X, y, fnames, cnames
+
+# ===================== Seleção do dataset =====================
+
+DATASET = "breast"  # "iris" | "bupa" | "breast" 
+
+if DATASET == "iris":
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    fnames, cnames = np.array(iris.feature_names), np.array(iris.target_names)
+elif DATASET == "bupa":
+    X, y, fnames, cnames = load_bupa()
+elif DATASET == "breast":
+    X, y, fnames, cnames = load_breast_tumor()
+else:
+    raise ValueError("Dataset inválido!")
+
+print(f"Dataset carregado: {DATASET}")
+print("X shape:", X.shape, "| y shape:", y.shape)
+print("Features:", len(fnames), "| Classes:", cnames)
+
+# ===================== Treino =====================
+
 Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.25, random_state=1, stratify=y)
-
 dt = DecisionTreeClassifier(random_state=0)
 rf = RandomForestClassifier(n_estimators=100, random_state=0)
 dt.fit(Xtr, ytr); rf.fit(Xtr, ytr)
@@ -316,7 +368,7 @@ print("=== Instance ===")
 print(x)
 print("Predições atuais: DT =", cnames[cur_dt], "| RF =", cnames[cur_rf])
 
-target_name = None  # "setosa" | "versicolor" | "virginica" | None (testar todas)
+target_name = None  
 
 def run_for_target(tgt_idx: int):
     print("\n============================")
@@ -336,7 +388,7 @@ def run_for_target(tgt_idx: int):
 
     cost_rf, chg_rf, chosen = solve_forest_min_changes(rf, x, tgt_idx, fnames)
     if cost_rf is None:
-        print("[FLORESTA] UNSAT (maioria impossível sob Σ).")
+        print("[FLORESTA] UNSAT (maioria impossível sob S).")
     else:
         print(f"[FLORESTA] #mín. mudanças: {cost_rf}")
         for s in chg_rf: print(" -", s)
@@ -401,11 +453,12 @@ stats = evaluate_explanations(
     dt=dt,
     rf=rf,
     Xtest=Xte,
-    n_classes=len(np.unique(y)),
+    n_classes=len(np.unique(y)),        
     feature_names=fnames,
     n_samples=n_samples,
     random_seed=1,
 )
+print("\n==== Estatísticas Agregadas ====")
 
 for k, v in stats.items():
     print(f"{k}: {v}")
