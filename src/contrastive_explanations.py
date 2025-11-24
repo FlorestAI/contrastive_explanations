@@ -13,6 +13,9 @@ import time
 import random
 from statistics import mean
 
+import pandas as pd
+from ucimlrepo import fetch_ucirepo
+
 # ----------------------------- utilitários comuns -----------------------------
 
 def collect_thresholds(models: List[Any]) -> Dict[int, List[float]]:
@@ -307,13 +310,50 @@ def evaluate_explanations(
     }
     return stats
 
-# ----------------------------- Demo no Iris -----------------------------
+# ----------------------------- LOAD DATASETS REAIS -----------------------------
 
-iris = load_iris()
-X, y = iris.data, iris.target
-fnames, cnames = np.array(iris.feature_names), np.array(iris.target_names)
+def load_bupa() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Dataset BUPA (Liver Disorders)"""
+    data = fetch_ucirepo(id=8)
+    X = data.data.features.apply(pd.to_numeric, errors='coerce').to_numpy()
+    X = np.nan_to_num(X, nan=0.0)
+    y = data.data.targets.to_numpy().reshape(-1)
+    y = (y == y.max()).astype(int)
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["no-disorder", "disorder"])
+    return X, y, fnames, cnames
+
+def load_breast_tumor() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Breast Cancer Coimbra"""
+    data = fetch_ucirepo(id=451)
+    X = data.data.features.to_numpy()
+    y = data.data.targets.to_numpy().reshape(-1)
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["benign", "malignant"])
+    return X, y, fnames, cnames
+
+# ===================== Seleção do dataset =====================
+
+DATASET = "breast"  # "iris" | "bupa" | "breast" 
+
+if DATASET == "iris":
+    iris = load_iris()
+    X, y = iris.data, iris.target
+    fnames, cnames = np.array(iris.feature_names), np.array(iris.target_names)
+elif DATASET == "bupa":
+    X, y, fnames, cnames = load_bupa()
+elif DATASET == "breast":
+    X, y, fnames, cnames = load_breast_tumor()
+else:
+    raise ValueError("Dataset inválido!")
+
+print(f"Dataset carregado: {DATASET}")
+print("X shape:", X.shape, "| y shape:", y.shape)
+print("Features:", len(fnames), "| Classes:", cnames)
+
+# ===================== Treino =====================
+
 Xtr, Xte, ytr, yte = train_test_split(X, y, test_size=0.25, random_state=1, stratify=y)
-
 dt = DecisionTreeClassifier(random_state=0)
 rf = RandomForestClassifier(n_estimators=100, random_state=0)
 dt.fit(Xtr, ytr); rf.fit(Xtr, ytr)
@@ -328,7 +368,7 @@ print("=== Instance ===")
 print(x)
 print("Predições atuais: DT =", cnames[cur_dt], "| RF =", cnames[cur_rf])
 
-target_name = None  # "setosa" | "versicolor" | "virginica" | None (testar todas)
+target_name = None  
 
 def run_for_target(tgt_idx: int):
     print("\n============================")
@@ -348,7 +388,7 @@ def run_for_target(tgt_idx: int):
 
     cost_rf, chg_rf, chosen = solve_forest_min_changes(rf, x, tgt_idx, fnames)
     if cost_rf is None:
-        print("[FLORESTA] UNSAT (maioria impossível sob Σ).")
+        print("[FLORESTA] UNSAT (maioria impossível sob S).")
     else:
         print(f"[FLORESTA] #mín. mudanças: {cost_rf}")
         for s in chg_rf: print(" -", s)
@@ -418,6 +458,7 @@ stats = evaluate_explanations(
     n_samples=n_samples,
     random_seed=1,
 )
+print("\n==== Estatísticas Agregadas ====")
 
 for k, v in stats.items():
     print(f"{k}: {v}")
