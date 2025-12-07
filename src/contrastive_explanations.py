@@ -356,6 +356,22 @@ def load_credit_approval():
     cnames = np.array(["denied", "approved"])
     return X, y, fnames, cnames
 
+def load_banknote():
+    """
+    Banknote Authentication
+    Objetivo: detectar cédulas verdadeiras (0) ou falsas (1).
+    Área: Segurança/forense
+    Poucas features → fácil interpretar mudanças
+    """
+    data = fetch_ucirepo(id=9)
+
+    X = data.data.features.to_numpy()  # já numérico
+    y = data.data.targets.to_numpy().reshape(-1)
+
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["genuine", "forged"])
+    return X, y, fnames, cnames
+
 # ===================== Seleção do dataset =====================
 
 DATASET = "breast"  # "iris" | "bupa" | "breast" 
@@ -370,6 +386,8 @@ elif DATASET == "breast":
     X, y, fnames, cnames = load_breast_tumor()
 elif DATASET == "credit":
  X, y, fnames, cnames = load_credit_approval():
+elif  DATASET == "banknote":
+ X, y, fnames, cnames = load_banknote():
 else:
     raise ValueError("Dataset inválido!")
 
