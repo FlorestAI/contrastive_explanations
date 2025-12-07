@@ -332,6 +332,30 @@ def load_breast_tumor() -> Tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]
     cnames = np.array(["benign", "malignant"])
     return X, y, fnames, cnames
 
+def load_credit_approval():
+    """
+    Credit Approval (UCI)
+    Objetivo: prever se o crédito será aprovado (1) ou negado (0).
+    Área: Mercado financeiro
+    Ideal para explicações: "o que preciso mudar para aprovar?"
+    """
+    data = fetch_ucirepo(id=27)
+
+    # Converte tudo para número (dataset contém categorias)
+    X = data.data.features.apply(pd.to_numeric, errors='coerce')
+    # Substitui valores faltantes por 0
+    X = X.fillna(0.0)
+    X = X.to_numpy()
+
+    # Classes → reshape para vetor simples
+    y = data.data.targets.to_numpy().reshape(-1)
+    # Maior valor vira a classe positiva (approved = 1)
+    y = (y == y.max()).astype(int)
+
+    fnames = np.array(list(data.data.features.columns))
+    cnames = np.array(["denied", "approved"])
+    return X, y, fnames, cnames
+
 # ===================== Seleção do dataset =====================
 
 DATASET = "breast"  # "iris" | "bupa" | "breast" 
@@ -344,6 +368,8 @@ elif DATASET == "bupa":
     X, y, fnames, cnames = load_bupa()
 elif DATASET == "breast":
     X, y, fnames, cnames = load_breast_tumor()
+elif DATASET == "credit":
+ X, y, fnames, cnames = load_credit_approval():
 else:
     raise ValueError("Dataset inválido!")
 
